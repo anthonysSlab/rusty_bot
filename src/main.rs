@@ -1,7 +1,7 @@
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use rusqlite::Connection;
-use rusqlite::NO_PARAMS;
+use std::fmt;
 
 use serenity::async_trait;
 use serenity::prelude::*;
@@ -11,17 +11,23 @@ use serenity::framework::standard::macros::{command, group};
 use serenity::framework::standard::{StandardFramework, CommandResult, Args};
 
 #[group]
-#[commands(roll, join, leave, list, change)]
+#[commands(roll, join, leave, list)]
 struct General;
 
 struct Handler;
 
 #[derive(Debug)]
 pub struct Res {
-    name: String,
+    peep: String,
     country: String,
-    games: String,
 }
+
+impl fmt::Display for Res {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} | {}", self.peep, self.country)
+    }
+}
+
 
 #[async_trait]
 impl EventHandler for Handler {
@@ -36,7 +42,7 @@ async fn main() {
         .configure(|c| c.prefix("!")) 
         .group(&GENERAL_GROUP);
 
-    let token = "MTA4MTkzNzI2MTE4NjI2OTI2NA.G0IGh1.QhG_nAPMudVpogO-4-fGjWrz7QBQU3TLYOHI3Y";
+    let token = "";
     let intents = GatewayIntents::non_privileged() | GatewayIntents::MESSAGE_CONTENT;
     let mut client = Client::builder(token, intents)
         .event_handler(Handler)
@@ -53,13 +59,32 @@ async fn main() {
 async fn roll(ctx: &Context, msg: &Message) -> CommandResult {
     if msg.author.to_string().eq(&"<@627015977233678336>".to_string()) {
 
-        msg.reply(ctx, "Doin the Thing").await?;
+        let con = Connection::open("stuff.db")?;
+        let mut qry = con.prepare("SELECT * FROM peeps;",)?;
+        let res = qry.query_map([], |row| {
+            Ok(Res {
+                peep: row.get(0)?,
+                country: row.get(1)?,
+            })
+        })?;
 
-        let mut nat = ["Germany", "USSR", "UK", "USA", "Italy", "France", "Japan"];
-        let res = "";
+        let mut coun = vec![];
+        let mut play = vec![];
+        let mut count = 0;
+    
+        for re in res {
+            coun.insert(count, re.as_ref().unwrap().country.to_string());
+            play.insert(count, re.unwrap().peep.to_string());
+            count = count + 1;
+            
+        }
 
-        nat.shuffle(&mut thread_rng());
-        println!("{:?}", nat);
+        println!("{:?} \n{:?}", coun, play);
+
+        // msg.reply(ctx, "Doin the Thing").await?;
+
+        coun.shuffle(&mut thread_rng());
+        println!("{}", coun);
 
     } else {
         msg.reply(ctx, "Permission Denied").await?;
@@ -69,29 +94,20 @@ async fn roll(ctx: &Context, msg: &Message) -> CommandResult {
 }
 
 #[command]
-#[derive(Debug)]
 async fn list(ctx: &Context, msg: &Message) -> CommandResult {
     let con = Connection::open("stuff.db")?;
     let mut qry = con.prepare("SELECT * FROM peeps;",)?;
-    let res = qry.query_map(NO_PARAMS, |row| {
+    let res = qry.query_map([], |row| {
         Ok(Res {
-            name: row.get(0)?,
+            peep: row.get(0)?,
             country: row.get(1)?,
-            games: row.get(2)?,
         })
     })?;
 
-    println!("{:?}", res);    
-
-    Ok(())
-}
-
-#[command]
-async fn change(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-
-    let cnt = args.single::<String>().unwrap();
-
-    msg.reply(ctx, "Changed chosen Country to ".to_owned() + &cnt + "!").await?;
+    for re in res {
+        println!("{}", re.as_ref().unwrap().to_string());
+        // msg.reply(ctx, re.unwrap().to_string()).await?;
+    }
 
     Ok(())
 }
@@ -115,21 +131,53 @@ async fn leave(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
 #[command]
 async fn join(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let con = Connection::open("stuff.db")?;
+    let cnt = args.single::<String>().unwrap();
+    let chk = ["Germany", "USSR", "UK", "USA", "Italy", "France", "Japan"];
+    let mut chn: bool = false;
 
-    let time = args.single::<String>().unwrap();
-
-    if time == "help".to_string() {
+    if cnt == "help".to_string() {
         msg.reply(ctx, "Specify the amount of games. \nAlternatively: perm = permanent \nSecond argument is the country you'd like to add").await?;
     } else {
-        let cnt = args.single::<String>().unwrap();
+        let mut qry = con.prepare("SELECT * FROM peeps;",)?;
+        let res = qry.query_map([], |row| {
+            Ok(Res {
+                peep: row.get(0)?,
+                country: row.get(1)?,
+            })
+        })?;
+
+        for re in res {
+            if re.as_ref().unwrap().peep.contains(&msg.author.to_string()) {
+                chn = true;
+            } 
+        }
     }
     
-    if time == "perm".to_string() {
-        msg.reply(ctx, "Joined Permanently! \n \"!leave\" to undo").await?;
+    let dat = Res {
+        peep: msg.author.to_string(),
+        country: (&cnt).to_string(),
+    };
+
+    if chk.contains(&cnt.as_str()) {
+        println!("{}", dat.to_string());
+
+        if chn == false {
+            con.execute(
+                "INSERT INTO peeps (peep, country) VALUES (?1, ?2);",
+                (&dat.peep, &dat.country),
+            )?;
+            msg.reply(ctx, "Joined with ".to_owned() + &dat.country.to_string() + "! \n \"!leave\" to undo").await?;
+        } else {
+            con.execute(
+                "UPDATE peeps SET country = ?1 WHERE peep = ?2;",
+                (&dat.country, &dat.peep),
+            )?;
+            msg.reply(ctx, "Joined with ".to_owned() + &dat.country.to_string() + "! \n \"!leave\" to undo").await?;
+        }
     } else {
-        let argi = time.parse::<i32>().unwrap();
-        msg.reply(ctx, "Joined for ".to_owned() + &argi.to_string() + " games!").await?;
-    }
-    
+        msg.reply(ctx, "Must Include a Valid Country! Here's a list of all: \nGermany, USSR, UK, USA, Italy, France, Japan \nMAY NOT REPEAT").await?;
+    } 
+
     Ok(())
 }
